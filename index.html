@@ -694,7 +694,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const payload = idToken.decodePayload();
         const groups = payload['cognito:groups'] || [];
 
-        if (groups.includes('ME-DMZ_Internal_Team')) {
+        if (groups.includes('ME-DMZ_Internal_Team') || groups.includes('HP_TEAM') || groups.includes('EPIC_APPROVED')) {
           document.cookie = `idToken=${jwt}; path=/; max-age=3600; Secure; SameSite=Strict`;
 
           authContainer.style.display = 'none';
