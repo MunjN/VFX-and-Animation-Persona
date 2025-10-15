@@ -515,44 +515,35 @@ async function exportTop200Rows() {
     spinner.classList.remove("hidden");
     text.textContent = "Exporting...";
 
-    const report = powerbi.get(document.getElementById("reportContainer"));
-    const activePage = await report.getActivePage();
-    const visuals = await activePage.getVisuals(); 
-    console.log(visuals);
-    const tableVisual = visuals.find(v => v.type === "table" || v.type === "matrix" || v.type === "pivotTable" || v.type === "tableEx");
-
-    if (!tableVisual) throw new Error("No table visual found on this page.");
-
-    const exported = await tableVisual.exportData({
-      rows: 200,
-      exportDataType: 1
+    // 🔹 Call your backend export route
+    const response = await fetch("https://vfx-and-animation-persona.onrender.com/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
     });
 
-    const byteCharacters = atob(exported.data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: "application/vnd.ms-excel" });
+    if (!response.ok) throw new Error("Export failed on server. Check logs.");
 
+    // 🔹 Receive the Excel blob
+    const blob = await response.blob();
     const url = URL.createObjectURL(blob);
+
+    // 🔹 Trigger download
     const a = document.createElement("a");
     a.href = url;
     a.download = "OrgDetails_Export.xlsx";
     a.click();
     URL.revokeObjectURL(url);
 
+    // 🔹 Show success toast
     toast.classList.remove("hidden");
     toast.classList.add("show");
     setTimeout(() => {
       toast.classList.remove("show");
       setTimeout(() => toast.classList.add("hidden"), 300);
     }, 2000);
-
   } catch (err) {
     console.error("Export failed:", err);
-    alert("Export failed. Check console for details.");
+    alert(err.message || "Export failed. Please check console or server logs.");
   } finally {
     btn.disabled = false;
     spinner.classList.add("hidden");
