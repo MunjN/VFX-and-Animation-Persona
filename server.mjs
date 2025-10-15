@@ -191,7 +191,7 @@ app.post('/export', async (req, res) => {
             EVALUATE
             TOPN(
               200,
-              'ORG DETAILS'
+              'UNPIVOTED_FX_DATA'
             )
           `
         }
