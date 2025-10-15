@@ -111,6 +111,67 @@
       text-align: center;
     }
     .hidden { display: none; }
+
+    /* === Export Button & Toast === */
+    #reportContainer {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      border: 0;
+      display: none;
+    }
+
+    #exportBtn {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      z-index: 1000;
+      background-color: rgba(239, 235, 255, 0.5);
+      border: 2px solid #1e3a8a; /* same deep blue outline as Filter */
+      color: #1e3a8a;
+      font-weight: 600;
+      border-radius: 10px;
+      padding: 6px 14px;
+      cursor: pointer;
+      backdrop-filter: blur(3px);
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #exportBtn:hover {
+      background-color: rgba(224, 220, 255, 0.8);
+    }
+
+    #exportSpinner {
+      border: 2px solid #1e3a8a;
+      border-top: 2px solid transparent;
+      border-radius: 50%;
+      width: 14px;
+      height: 14px;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    #exportToast {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background-color: #1e3a8a;
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 500;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    #exportToast.show {
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
@@ -128,7 +189,16 @@
   </div>
 
   <!-- Power BI container -->
-  <div id="reportContainer" style="width: 100vw; height: 100vh; border: 0; display: none;"></div>
+  <div id="reportContainer">
+    <!-- Floating Export Button -->
+    <button id="exportBtn" onclick="exportTop200Rows()">
+      <span id="exportText">⬇ Export Excel</span>
+      <span id="exportSpinner" class="hidden"></span>
+    </button>
+
+    <!-- Exported Toast -->
+    <div id="exportToast" class="hidden">✅ Exported successfully</div>
+  </div>
 
   <!-- Auth container -->
   <div class="login-container" id="authContainer">
@@ -177,13 +247,10 @@
       <h2>Reset Password</h2>
       <label for="fpFullName">Full Name</label>
       <input type="text" id="fpFullName" required />
-
       <label for="fpEmail">Email</label>
       <input type="email" id="fpEmail" required />
       <button type="button" id="sendCodeBtn">Send Reset Code</button>
-
       <br><br>
-
       <label for="fpCode">Verification Code</label>
       <input type="text" id="fpCode" required />
       <label for="fpNewPassword">New Password</label>
@@ -261,7 +328,6 @@ window.addEventListener('DOMContentLoaded', () => {
           authContainer.style.display = 'none';
           document.querySelector('header').style.display = 'none';
           document.querySelector('.banner').style.display = 'none';
-
           document.getElementById('reportContainer').style.display = 'block';
           await initialize(jwt);
         } else {
@@ -350,7 +416,7 @@ window.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    pendingUser.confirmRegistration(code, true, (err, result) => {
+    pendingUser.confirmRegistration(code, true, (err) => {
       if (err) {
         console.error('Verification error:', err);
         setStatus(err.message || 'Verification failed', true);
@@ -419,6 +485,62 @@ async function initialize(idToken) {
     console.error("Error initializing report:", error);
   }
 }
+
+/* === Export Logic === */
+async function exportTop200Rows() {
+  const btn = document.getElementById("exportBtn");
+  const spinner = document.getElementById("exportSpinner");
+  const text = document.getElementById("exportText");
+  const toast = document.getElementById("exportToast");
+
+  try {
+    btn.disabled = true;
+    spinner.classList.remove("hidden");
+    text.textContent = "Exporting...";
+
+    const report = powerbi.get(document.getElementById("reportContainer"));
+    const activePage = await report.getActivePage();
+    const visuals = await activePage.getVisuals();
+    const tableVisual = visuals.find(v => v.type === "table" || v.type === "matrix");
+
+    if (!tableVisual) throw new Error("No table visual found on this page.");
+
+    const exported = await tableVisual.exportData({
+      rows: 200,
+      exportDataType: 1
+    });
+
+    const byteCharacters = atob(exported.data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: "application/vnd.ms-excel" });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "OrgDetails_Export.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast.classList.remove("hidden");
+    toast.classList.add("show");
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.classList.add("hidden"), 300);
+    }, 2000);
+
+  } catch (err) {
+    console.error("Export failed:", err);
+    alert("Export failed. Check console for details.");
+  } finally {
+    btn.disabled = false;
+    spinner.classList.add("hidden");
+    text.textContent = "⬇ Export Excel";
+  }
+}
 </script>
 </body>
-</html> 
+</html>
