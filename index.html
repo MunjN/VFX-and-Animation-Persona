@@ -519,7 +519,7 @@ async function exportTop200Rows() {
     const activePage = await report.getActivePage();
     const visuals = await activePage.getVisuals(); 
     console.log(visuals);
-    const tableVisual = visuals.find(v => v.type === "Table" || v.type === "Matrix");
+    const tableVisual = visuals.find(v => v.type === "Table" || v.type === "Matrix" || v.type === "pivotTable");
 
     if (!tableVisual) throw new Error("No table visual found on this page.");
 
