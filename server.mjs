@@ -124,15 +124,16 @@ app.post("/export-to-excel", async (req, res) => {
           const cleanValues = f.values.filter((v) => v !== null && v !== undefined);
           if (cleanValues.length === 0) continue;
 
-          const colRef = `'${table}'[${column}]`;
-          const vals = cleanValues
-            .map((v) => `'${String(v).replace(/'/g, "''")}'`)
-            .join(", ");
+      const colRef = `'${table}'[${column}]`;
+const vals = cleanValues
+  .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+  .join(", ");
 
-          let clause = `${colRef} IN {${vals}}`;
-          if (f.operator && f.operator.toLowerCase() === "notin") {
-            clause = `NOT(${colRef} IN {${vals}})`;
-          }
+let clause = `${colRef} IN {${vals}}`;
+if (f.operator && f.operator.toLowerCase() === "notin") {
+  clause = `NOT(${colRef} IN {${vals}})`;
+}
+
 
           validFilters.push(clause);
         } catch (e) {
