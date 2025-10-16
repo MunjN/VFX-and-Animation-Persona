@@ -198,14 +198,27 @@ app.post("/export-to-excel", async (req, res) => {
         !f.target.column ||
         !Array.isArray(f.values) ||
         f.values.length === 0
-      )
+      ) {
+        console.log("⚠️ Skipping filter:", f);
         return null;
+      }
 
-      // Clean up quotes
-      const table = f.target.table.replace(/'/g, "");
-      const column = f.target.column.replace(/'/g, "");
+      // extra guard before replace
+      const table =
+        typeof f.target.table === "string"
+          ? f.target.table.replace(/'/g, "")
+          : "";
+      const column =
+        typeof f.target.column === "string"
+          ? f.target.column.replace(/'/g, "")
+          : "";
+
+      if (!table || !column) return null;
+
       const colRef = `'${table}'[${column}]`;
-      const vals = f.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(", ");
+      const vals = f.values
+        .map((v) => `'${String(v).replace(/'/g, "''")}'`)
+        .join(", ");
       return `${colRef} IN {${vals}}`;
     })
     .filter(Boolean);
@@ -216,6 +229,7 @@ app.post("/export-to-excel", async (req, res) => {
     filterConditions = "";
   }
 }
+
 
 
     const daxQuery = `
