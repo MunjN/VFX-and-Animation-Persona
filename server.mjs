@@ -100,7 +100,9 @@ const port = 3000;
 app.use(cors());
 app.use(express.json());
 
-// Auth token route (unchanged)
+// =========================================================
+// 🔹 Auth Token Route (unchanged)
+// =========================================================
 app.post("/auth-token", async (req, res) => {
   const tenantId = process.env.TENANT_ID;
   const clientId = process.env.CLIENT_ID;
@@ -129,7 +131,9 @@ app.post("/auth-token", async (req, res) => {
   }
 });
 
-// Embed token route (unchanged)
+// =========================================================
+// 🔹 Embed Token Route (unchanged)
+// =========================================================
 app.post("/embed-token", async (req, res) => {
   const groupId = "f0795f87-1ddd-47e8-8d54-088db38f6507";
   const reportId = "3ea11afe-6e16-498f-8acd-6df601280226";
@@ -156,14 +160,15 @@ app.post("/embed-token", async (req, res) => {
 });
 
 // =========================================================
-// 🔹 Premium Export Route (ExportToFile API)
+// 🔹 Dynamic Filtered Export to Excel Route
 // =========================================================
-app.post("/export-visual", async (req, res) => {
+app.post("/export-to-excel", async (req, res) => {
   const tenantId = process.env.TENANT_ID;
   const clientId = process.env.CLIENT_ID;
   const clientSecret = process.env.CLIENT_SECRET;
+  const datasetId = "867dc48c-c22e-4ed8-90ec-a16952dfcbf0"; // Your dataset ID
   const groupId = "f0795f87-1ddd-47e8-8d54-088db38f6507";
-  const reportId = "3ea11afe-6e16-498f-8acd-6df601280226";
+  const filters = req.body.filters || [];
 
   try {
     // 1️⃣ Get Power BI Access Token
@@ -182,69 +187,84 @@ app.post("/export-visual", async (req, res) => {
     const accessToken = tokenData.access_token;
     if (!accessToken) throw new Error("No access token returned.");
 
-    // 2️⃣ Start Export Job (Org Details page)
-    const startResp = await fetch(
-      `https://api.powerbi.com/v1.0/myorg/groups/${groupId}/reports/${reportId}/ExportTo`,
+    // 2️⃣ Build DAX Query (flattened, structured like pivot table)
+    let filterConditions = "";
+    if (filters.length > 0) {
+      const daxFilters = filters
+        .map((f) => {
+          if (!f.target || !f.target.column) return "";
+          const col = `'${f.target.table}'[${f.target.column}]`;
+          const values = f.values?.map((v) => `'${v}'`).join(", ");
+          return `${col} IN {${values}}`;
+        })
+        .filter(Boolean);
+
+      if (daxFilters.length > 0) {
+        filterConditions = `, ${daxFilters.join(" && ")}`;
+      }
+    }
+
+    const daxQuery = `
+      EVALUATE
+      TOPN(
+        200,
+        SELECTCOLUMNS(
+          CALCULATETABLE('UNPIVOTED_FX_DATA'${filterConditions}),
+          "ORG_ID", 'UNPIVOTED_FX_DATA'[ORG_ID],
+          "ORG_NAME", 'UNPIVOTED_FX_DATA'[ORG_NAME],
+          "CATEGORY", 'UNPIVOTED_FX_DATA'[CATEGORY],
+          "ATTRIBUTE", 'UNPIVOTED_FX_DATA'[ATTRIBUTE],
+          "VALUE", 'UNPIVOTED_FX_DATA'[DISPLAY_VALUE]
+        )
+      )
+    `;
+
+    console.log("🧠 Running DAX Query:", daxQuery);
+
+    // 3️⃣ Execute Query
+    const execResp = await fetch(
+      `https://api.powerbi.com/v1.0/myorg/groups/${groupId}/datasets/${datasetId}/executeQueries`,
       {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          format: "XLSX",
-          powerBIReportConfiguration: {
-            pages: [
-              {
-                // You can also add visualName if you only want one visual
-                pageName: "Org Details", // <-- change to your actual Org Details page name
-              },
-            ],
-          },
-        }),
+        body: JSON.stringify({ queries: [{ query: daxQuery }] }),
       }
     );
 
-    const startData = await startResp.json();
-    if (!startResp.ok) throw new Error(JSON.stringify(startData));
+    const execData = await execResp.json();
+    if (!execResp.ok) throw new Error(JSON.stringify(execData));
 
-    const exportId = startData.id;
-    console.log("Export job started:", exportId);
+    const tableData = execData.results[0].tables[0];
+    const columns = tableData.columns.map((c) => c.name);
+    const rows = tableData.rows;
 
-    // 3️⃣ Poll until export job completes
-    let status = "Running";
-    let exportResult = null;
+    // 4️⃣ Convert JSON to Excel
+    const sheetData = [columns, ...rows];
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "OrgDetails");
 
-    while (status === "Running" || status === "NotStarted") {
-      await new Promise((r) => setTimeout(r, 3000));
-      const pollResp = await fetch(
-        `https://api.powerbi.com/v1.0/myorg/groups/${groupId}/reports/${reportId}/exports/${exportId}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      exportResult = await pollResp.json();
-      status = exportResult.status;
-      console.log("Export status:", status);
-    }
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 
-    if (status !== "Succeeded") throw new Error(`Export failed: ${status}`);
-
-    // 4️⃣ Download exported file
-    const fileResp = await fetch(exportResult.resourceLocation, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const buffer = await fileResp.arrayBuffer();
-
-    // 5️⃣ Return file to client
+    // 5️⃣ Send file to client
     res.setHeader("Content-Disposition", "attachment; filename=OrgDetails_Export.xlsx");
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    res.send(Buffer.from(buffer));
+    res.send(buffer);
+
   } catch (err) {
-    console.error("Premium export error:", err);
+    console.error("❌ Export to Excel error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// =========================================================
+// 🚀 Start Server
+// =========================================================
 app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
+
