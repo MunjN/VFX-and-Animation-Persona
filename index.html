@@ -503,25 +503,40 @@ async function initialize(idToken) {
   }
 }
 
-/* === Export Logic === */
+/* === Dynamic Export Logic === */
 async function exportTop200Rows() {
   const btn = document.getElementById("exportBtn");
   const spinner = document.getElementById("exportSpinner");
   const text = document.getElementById("exportText");
   const toast = document.getElementById("exportToast");
+  const backendUrl = "https://vfx-and-animation-persona.onrender.com"; // your server
 
   try {
     btn.disabled = true;
     spinner.classList.remove("hidden");
     text.textContent = "Exporting...";
 
-    const response = await fetch("https://vfx-and-animation-persona.onrender.com/export-visual", {
+    // 🧠 Get current report and active filters
+    const reportContainer = document.getElementById("reportContainer");
+    const report = powerbi.get(reportContainer);
+    const activePage = await report.getActivePage();
+    const reportFilters = await report.getFilters();
+    const pageFilters = await activePage.getFilters();
+
+    // Merge both report-level + page-level filters
+    const allFilters = [...reportFilters, ...pageFilters];
+    console.log("🧾 Filters being sent to backend:", allFilters);
+
+    // 📨 Send filters to backend
+    const response = await fetch(`${backendUrl}/export-to-excel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters: allFilters }),
     });
 
     if (!response.ok) throw new Error("Export failed on server. Check logs.");
 
+    // 📦 Convert response to Excel file
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -530,15 +545,17 @@ async function exportTop200Rows() {
     a.click();
     URL.revokeObjectURL(url);
 
+    // ✅ Show success toast
     toast.classList.remove("hidden");
     toast.classList.add("show");
     setTimeout(() => {
       toast.classList.remove("show");
       setTimeout(() => toast.classList.add("hidden"), 300);
     }, 2000);
+
   } catch (err) {
-    console.error("Export failed:", err);
-    alert(err.message || "Export failed. Please check console or server logs.");
+    console.error("❌ Export failed:", err);
+    alert(err.message || "Export failed. Check console for details.");
   } finally {
     btn.disabled = false;
     spinner.classList.add("hidden");
