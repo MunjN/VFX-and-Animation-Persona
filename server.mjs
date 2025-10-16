@@ -1,91 +1,3 @@
-// import express from 'express';
-// import fetch from 'node-fetch';
-// import cors from 'cors';
-// import e from 'express';
-// import dotenv from 'dotenv';
-
-
-// const app = express();
-// const port = 3000;
-
-// // Enable CORS for all origins
-// app.use(cors());
-
-// // Middleware to parse JSON bodies
-// app.use(express.json());
-
-// // Endpoint to fetch Auth Token
-// app.post('/auth-token', async (req, res) => { 
-//   // environment variables
-//   const tenantId = process.env.TENANT_ID;
-//   const clientId = process.env.CLIENT_ID;  
-//   const clientSecret = process.env.CLIENT_SECRET;  
-
-//   const scope = "https://analysis.windows.net/powerbi/api/.default";
-//   const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-
-//   try {
-//     const response = await fetch(authUrl, {
-//       method: 'POST',
-//       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-//       body: new URLSearchParams({
-//         grant_type: 'client_credentials',
-//         client_id: clientId,
-//         client_secret: clientSecret,
-//         scope: scope
-//       })
-//     });
-
-//     if (!response.ok) {
-//       throw new Error('Failed to fetch Auth Token');
-//     }
-
-//     const data = await response.json();
-//     res.json(data); // Send back the auth token to the frontend
-//   } catch (error) {
-//     console.error('Error fetching Auth Token:', error);
-//     res.status(500).json({ error: 'Failed to fetch Auth Token' });
-//   }
-// });
-
-// // Endpoint to fetch Embed Token
-// app.post('/embed-token', async (req, res) => {
-//   const groupId = "f0795f87-1ddd-47e8-8d54-088db38f6507";
-//   const reportId = "3ea11afe-6e16-498f-8acd-6df601280226";
-//   const powerBIUrl = `https://api.powerbi.com/v1.0/myorg/groups/${groupId}/reports/${reportId}/GenerateToken`;
-
-//   // Auth token is sent from the frontend
-//   const authToken = req.body.authToken;
-
-//   try {
-//     const response = await fetch(powerBIUrl, {
-//       method: 'POST',
-//       headers: {
-//         'Content-Type': 'application/json',
-//         Authorization: `Bearer ${authToken}`
-//       },
-//       body: JSON.stringify({ accessLevel: 'View' }) 
-//     });
-
-//     if (!response.ok) {
-//       throw new Error('Failed to fetch Embed Token');
-//     }
-
-//     const data = await response.json();
-//     res.json(data); // Send back the embed token and embed URL to the frontend
-//   } catch (error) {
-//     console.error('Error fetching Embed Token:', error);
-//     res.status(500).json({ error: 'Failed to fetch Embed Token' });
-//   }
-// });
-
-// // Start the server
-// app.listen(port, () => {
-//   console.log(`Server running on http://localhost:${port}`);
-// });
-
-
-
 import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
@@ -101,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // =========================================================
-// 🔹 Auth Token Route (unchanged)
+// 🔹 Auth Token Route
 // =========================================================
 app.post("/auth-token", async (req, res) => {
   const tenantId = process.env.TENANT_ID;
@@ -132,7 +44,7 @@ app.post("/auth-token", async (req, res) => {
 });
 
 // =========================================================
-// 🔹 Embed Token Route (unchanged)
+// 🔹 Embed Token Route
 // =========================================================
 app.post("/embed-token", async (req, res) => {
   const groupId = "f0795f87-1ddd-47e8-8d54-088db38f6507";
@@ -166,7 +78,7 @@ app.post("/export-to-excel", async (req, res) => {
   const tenantId = process.env.TENANT_ID;
   const clientId = process.env.CLIENT_ID;
   const clientSecret = process.env.CLIENT_SECRET;
-  const datasetId = "867dc48c-c22e-4ed8-90ec-a16952dfcbf0"; // Your dataset ID
+  const datasetId = "867dc48c-c22e-4ed8-90ec-a16952dfcbf0";
   const groupId = "f0795f87-1ddd-47e8-8d54-088db38f6507";
   const filters = req.body.filters || [];
 
@@ -187,57 +99,61 @@ app.post("/export-to-excel", async (req, res) => {
     const accessToken = tokenData.access_token;
     if (!accessToken) throw new Error("No access token returned.");
 
-    // 2️⃣ Build DAX Query (flattened, structured like pivot table)
+    // 2️⃣ Build DAX Query (null-safe)
     let filterConditions = "";
-  if (filters.length > 0) {
-  const daxFilters = filters
-    .map((f) => {
-      if (
-        !f.target ||
-        !f.target.table ||
-        !f.target.column ||
-        !Array.isArray(f.values) ||
-        f.values.length === 0
-      ) {
-        console.log("⚠️ Skipping filter:", f);
-        return null;
+
+    if (Array.isArray(filters) && filters.length > 0) {
+      const validFilters = [];
+
+      for (const f of filters) {
+        try {
+          if (
+            !f.target ||
+            typeof f.target.table !== "string" ||
+            typeof f.target.column !== "string" ||
+            !Array.isArray(f.values)
+          ) {
+            console.log("⚠️ Skipping invalid filter:", f);
+            continue;
+          }
+
+          const table = f.target.table.trim();
+          const column = f.target.column.trim();
+          if (!table || !column) continue;
+
+          const cleanValues = f.values.filter((v) => v !== null && v !== undefined);
+          if (cleanValues.length === 0) continue;
+
+          const colRef = `'${table}'[${column}]`;
+          const vals = cleanValues
+            .map((v) => `'${String(v).replace(/'/g, "''")}'`)
+            .join(", ");
+
+          let clause = `${colRef} IN {${vals}}`;
+          if (f.operator && f.operator.toLowerCase() === "notin") {
+            clause = `NOT(${colRef} IN {${vals}})`;
+          }
+
+          validFilters.push(clause);
+        } catch (e) {
+          console.log("⚠️ Filter parse error, skipping:", e);
+        }
       }
 
-      // extra guard before replace
-      const table =
-        typeof f.target.table === "string"
-          ? f.target.table.replace(/'/g, "")
-          : "";
-      const column =
-        typeof f.target.column === "string"
-          ? f.target.column.replace(/'/g, "")
-          : "";
-
-      if (!table || !column) return null;
-
-      const colRef = `'${table}'[${column}]`;
-      const vals = f.values
-        .map((v) => `'${String(v).replace(/'/g, "''")}'`)
-        .join(", ");
-      return `${colRef} IN {${vals}}`;
-    })
-    .filter(Boolean);
-
-  if (daxFilters.length > 0) {
-    filterConditions = `, ${daxFilters.join(" && ")}`;
-  } else {
-    filterConditions = "";
-  }
-}
-
-
+      if (validFilters.length > 0) {
+        filterConditions = `, ${validFilters.join(" && ")}`;
+      }
+    }
 
     const daxQuery = `
       EVALUATE
       TOPN(
         200,
         SELECTCOLUMNS(
-          CALCULATETABLE('UNPIVOTED_FX_DATA'${filterConditions}),
+          CALCULATETABLE(
+            'UNPIVOTED_FX_DATA'
+            ${filterConditions}
+          ),
           "ORG_ID", 'UNPIVOTED_FX_DATA'[ORG_ID],
           "ORG_NAME", 'UNPIVOTED_FX_DATA'[ORG_NAME],
           "CATEGORY", 'UNPIVOTED_FX_DATA'[CATEGORY],
@@ -247,15 +163,15 @@ app.post("/export-to-excel", async (req, res) => {
       )
     `;
 
-    console.log("🧠 Running DAX Query:", daxQuery);
+    console.log("🧠 Final DAX Query:\n", daxQuery);
 
-    // 3️⃣ Execute Query
+    // 3️⃣ Execute DAX Query
     const execResp = await fetch(
       `https://api.powerbi.com/v1.0/myorg/groups/${groupId}/datasets/${datasetId}/executeQueries`,
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ queries: [{ query: daxQuery }] }),
@@ -266,6 +182,10 @@ app.post("/export-to-excel", async (req, res) => {
     if (!execResp.ok) throw new Error(JSON.stringify(execData));
 
     const tableData = execData.results[0].tables[0];
+    if (!tableData || !tableData.columns || !tableData.rows) {
+      throw new Error("No data returned from Power BI.");
+    }
+
     const columns = tableData.columns.map((c) => c.name);
     const rows = tableData.rows;
 
@@ -284,7 +204,6 @@ app.post("/export-to-excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.send(buffer);
-
   } catch (err) {
     console.error("❌ Export to Excel error:", err);
     res.status(500).json({ error: err.message });
@@ -295,4 +214,3 @@ app.post("/export-to-excel", async (req, res) => {
 // 🚀 Start Server
 // =========================================================
 app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
-
