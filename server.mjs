@@ -142,7 +142,7 @@ if (f.operator && f.operator.toLowerCase() === "notin") {
       }
 
       if (validFilters.length > 0) {
-        filterConditions = `, ${validFilters.join(" && ")}`;
+        filterConditions = `, ${validFilters.join(", ")}`;
       }
     }
 
