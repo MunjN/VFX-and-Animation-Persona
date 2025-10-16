@@ -72,7 +72,7 @@ app.post("/embed-token", async (req, res) => {
 });
 
 // =========================================================
-// 🔹 Dynamic Filtered Export to Excel Route
+// 🔹 Dynamic Filtered Export to Excel Route (TREATAS version)
 // =========================================================
 app.post("/export-to-excel", async (req, res) => {
   const tenantId = process.env.TENANT_ID;
@@ -84,27 +84,28 @@ app.post("/export-to-excel", async (req, res) => {
 
   try {
     // 1️⃣ Get Power BI Access Token
-    const tokenResp = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: "https://analysis.windows.net/powerbi/api/.default",
-      }),
-    });
+    const tokenResp = await fetch(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: "https://analysis.windows.net/powerbi/api/.default",
+        }),
+      }
+    );
 
     const tokenData = await tokenResp.json();
     const accessToken = tokenData.access_token;
     if (!accessToken) throw new Error("No access token returned.");
 
-    // 2️⃣ Build DAX Query (null-safe)
-    let filterConditions = "";
+    // 2️⃣ Build DAX Query (TREATAS-based)
+    let treatasClauses = [];
 
     if (Array.isArray(filters) && filters.length > 0) {
-      const validFilters = [];
-
       for (const f of filters) {
         try {
           if (
@@ -119,33 +120,29 @@ app.post("/export-to-excel", async (req, res) => {
 
           const table = f.target.table.trim();
           const column = f.target.column.trim();
-          if (!table || !column) continue;
-
-          const cleanValues = f.values.filter((v) => v !== null && v !== undefined);
+          const cleanValues = f.values.filter(
+            (v) => v !== null && v !== undefined
+          );
           if (cleanValues.length === 0) continue;
 
-      const colRef = `'${table}'[${column}]`;
-const vals = cleanValues
-  .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-  .join(", ");
+          const formattedValues = cleanValues
+            .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+            .join(", ");
 
-let clause = `${colRef} IN {${vals}}`;
-if (f.operator && f.operator.toLowerCase() === "notin") {
-  clause = `NOT(${colRef} IN {${vals}})`;
-}
-
-
-          validFilters.push(clause);
+          // Build TREATAS clause
+          const treatas = `TREATAS({${formattedValues}}, '${table}'[${column}])`;
+          treatasClauses.push(treatas);
         } catch (e) {
           console.log("⚠️ Filter parse error, skipping:", e);
         }
       }
-
-      if (validFilters.length > 0) {
-        filterConditions = `, ${validFilters.join(", ")}`;
-      }
     }
 
+    // Combine into CALCULATETABLE arguments
+    const filterBlock =
+      treatasClauses.length > 0 ? ", " + treatasClauses.join(", ") : "";
+
+    // Final DAX query with TREATAS filters
     const daxQuery = `
       EVALUATE
       TOPN(
@@ -153,7 +150,7 @@ if (f.operator && f.operator.toLowerCase() === "notin") {
         SELECTCOLUMNS(
           CALCULATETABLE(
             'UNPIVOTED_FX_DATA'
-            ${filterConditions}
+            ${filterBlock}
           ),
           "ORG_ID", 'UNPIVOTED_FX_DATA'[ORG_ID],
           "ORG_NAME", 'UNPIVOTED_FX_DATA'[ORG_NAME],
@@ -182,7 +179,7 @@ if (f.operator && f.operator.toLowerCase() === "notin") {
     const execData = await execResp.json();
     if (!execResp.ok) throw new Error(JSON.stringify(execData));
 
-    const tableData = execData.results[0].tables[0];
+    const tableData = execData.results[0]?.tables?.[0];
     if (!tableData || !tableData.columns || !tableData.rows) {
       throw new Error("No data returned from Power BI.");
     }
@@ -199,7 +196,10 @@ if (f.operator && f.operator.toLowerCase() === "notin") {
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 
     // 5️⃣ Send file to client
-    res.setHeader("Content-Disposition", "attachment; filename=OrgDetails_Export.xlsx");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=OrgDetails_Export.xlsx"
+    );
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -214,4 +214,6 @@ if (f.operator && f.operator.toLowerCase() === "notin") {
 // =========================================================
 // 🚀 Start Server
 // =========================================================
-app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
+app.listen(port, () =>
+  console.log(`🚀 Server running on http://localhost:${port}`)
+);
