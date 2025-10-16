@@ -189,20 +189,34 @@ app.post("/export-to-excel", async (req, res) => {
 
     // 2️⃣ Build DAX Query (flattened, structured like pivot table)
     let filterConditions = "";
-    if (filters.length > 0) {
-      const daxFilters = filters
-        .map((f) => {
-          if (!f.target || !f.target.column) return "";
-          const col = `'${f.target.table}'[${f.target.column}]`;
-          const values = f.values?.map((v) => `'${v}'`).join(", ");
-          return `${col} IN {${values}}`;
-        })
-        .filter(Boolean);
+  if (filters.length > 0) {
+  const daxFilters = filters
+    .map((f) => {
+      if (
+        !f.target ||
+        !f.target.table ||
+        !f.target.column ||
+        !Array.isArray(f.values) ||
+        f.values.length === 0
+      )
+        return null;
 
-      if (daxFilters.length > 0) {
-        filterConditions = `, ${daxFilters.join(" && ")}`;
-      }
-    }
+      // Clean up quotes
+      const table = f.target.table.replace(/'/g, "");
+      const column = f.target.column.replace(/'/g, "");
+      const colRef = `'${table}'[${column}]`;
+      const vals = f.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(", ");
+      return `${colRef} IN {${vals}}`;
+    })
+    .filter(Boolean);
+
+  if (daxFilters.length > 0) {
+    filterConditions = `, ${daxFilters.join(" && ")}`;
+  } else {
+    filterConditions = "";
+  }
+}
+
 
     const daxQuery = `
       EVALUATE
